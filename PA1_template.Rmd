@@ -1,20 +1,222 @@
-# Reproducible Research: Peer Assessment 1
-
+# Coursera JHU Datascience: Reproducible Research: Peer Assessment 1
+Balaji Iyengar
 
 ## Loading and preprocessing the data
+```{r}
+entity_df <- read.csv("activity.csv")
+```
 
+Print sample observations
+```{r myprint_sample}
+myprint_sample <- function(df) {
+    print(head(df))
+    
+    # print 6 sample obs
+    print(df[sort(sample(1:dim(df)[1], 6)),])
+    
+    print(tail(df))
+}
 
+myprint_sample(entity_df)
+```
 
 ## What is mean total number of steps taken per day?
 
+#### Make a histogram of the total number of steps taken each day  
 
+Sum steps by date
+```{r}
+myaggregate_numorlgcl <- function (df, by_names, func) {
+
+    # Keep only numeric or logical columns
+    dfcols_df <- data.frame(type=sapply(df, class))
+    keep_cols <- rownames(dfcols_df)[dfcols_df[, "type"] %in% 
+                                     c("integer", "numeric", "logical")]
+    # Drop cols in by_names
+    keep_cols <- setdiff(keep_cols, by_names)
+    
+    # Build df with only numeric/logical & by cols
+    subset_df <- cbind(df[, keep_cols, drop=FALSE], df[, by_names, drop=FALSE])
+    names(subset_df) <- c(keep_cols, by_names)
+    
+    # Drop obs with NAs
+    num_complete_cases <- sum(complete.cases(subset_df))
+    if (num_complete_cases < dim(df)[1]) {
+        num_excl_cases <- dim(df)[1] - num_complete_cases
+        warning (sprintf("excluding %s (%0.1f pct) obs with NA", 
+                         prettyNum(num_excl_cases, big.mark=","),
+                         num_excl_cases * 100.0 / dim(df)[1]))
+        subset_df <- subset_df[complete.cases(subset_df), , drop=FALSE]         
+    }
+    
+    by_lst <- sapply(by_names, function(byvar) list(subset_df[, byvar]))
+    agg_df <- aggregate(subset_df[, keep_cols], by_lst, func)
+    
+    # Add a suffix of the function name to the aggregated columns
+    func_names_dct <- list(mean=mean, sum=sum)
+    if (c(func) %in% func_names_dct) {
+        name_suffix <- names(func_names_dct)[match(c(func), func_names_dct)]
+        new_col_names <- sapply(keep_cols, function(name) paste(name, 
+                                                                name_suffix,
+                                                                sep="_"))
+        names(agg_df) <- c(by_names, new_col_names)
+    } else warning("column names renaming unsupported for unknown func", 
+                   str(func))    
+    
+    return(agg_df)
+}
+
+entity_agg_date_df <- myaggregate_numorlgcl(subset(entity_df, 
+                                                   select=-c(interval)), 
+                                            "date", sum)
+```
+
+Create weekday / weekend feature
+```{r}
+mycreate_date2daytype <- function (df, date_col_name) {
+    new_df <- df
+    
+    day_col_name <- paste(date_col_name, "day", sep="_")
+    new_df[, day_col_name] <- weekdays(as.Date(df[, date_col_name]))
+    
+    daytype_col_name <- paste(date_col_name, "dytyp", sep="_")
+    new_df[, daytype_col_name] <- ifelse((new_df[, day_col_name] == "Saturday") |
+                                         (new_df[, day_col_name] == "Sunday"),
+                                         "weekend", "weekday")
+    return(new_df)
+}
+
+entity_agg_date_df <- mycreate_date2daytype(entity_agg_date_df, "date") 
+```
+
+Plot histogram of steps by date & fill with day type
+```{r}
+myplot_histogram <- function(df, hst_col_name, fill_col_name=NULL) {
+    require(ggplot2)
+    
+    if (is.null(fill_col_name)) {
+        # Fill with raw counts
+        g <- ggplot(df, aes_string(x=hst_col_name))
+        g + geom_histogram(aes(fill=..count..)) + 
+            scale_fill_gradient("Count", low="red", high="blue")        
+    }
+    else {
+        # If fill variable has 5 or less unique values use raw data 
+        if (length(unique(df[, fill_col_name])) <= 5) {
+            
+            # if fill variable is a factor use raw data
+            if (class(df[, fill_col_name]) == "factor") {
+                g <- ggplot(df, aes_string(x=hst_col_name, fill=fill_col_name))
+            } else {
+            # else create a factor of the fill variable    
+                fill_col_fctr_name <- paste0(fill_col_name, "_fctr")
+                df[, fill_col_fctr_name] <- as.factor(df[, fill_col_name])
+                g <- ggplot(df, aes_string(x=hst_col_name, 
+                                           fill=fill_col_fctr_name))
+            }
+        } else {
+        # else fill with 5 groups of the data    
+            fill_col_grp_name <- paste0(fill_col_name, "_grp")
+            df[, fill_col_grp_name] <- cut(df[, fill_col_name], 5) 
+            # Why does cut create labels with -ve values although min is 0 ?
+            
+            g <- ggplot(df, aes_string(x=hst_col_name, fill=fill_col_grp_name))
+        }
+        g + geom_bar() + # guides(fill=FALSE) +
+            
+            # Add median & mean as vertical lines 
+            geom_vline(xintercept=mean(df[, hst_col_name], na.rm=TRUE), 
+                       linetype="dotted") + 
+            geom_vline(xintercept=median(df[, hst_col_name], na.rm=TRUE), 
+                       linetype="dashed") + 
+            
+            # The legend for vlines does not display - don't know why
+            #scale_linetype_discrete(name="V-line", 
+            scale_linetype_manual(name="V-line",                       
+                                  guide="legend",
+                                  #guide=guide_legend(nrow=2),
+                                  values=c("dotted", "dashed"),
+                                  labels=c("mean", "median"))
+    }
+}
+
+myplot_histogram(entity_agg_date_df, "steps_sum", fill_col_name="date_dytyp")
+```
+
+The legend for vertical lines of median & mean does not show - what's wrong ?  
+
+#### Calculate and report the mean and median total number of steps taken per day
+```{r}
+summary(entity_agg_date_df$steps_sum)                     
+```
 
 ## What is the average daily activity pattern?
 
+#### Make a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all days (y-axis)
 
+```{r}
+entity_agg_intrvl_df <- myaggregate_numorlgcl(entity_df, "interval", mean)
+g <- ggplot(entity_agg_intrvl_df, aes(x=interval, y=steps_mean))
+g + geom_line()
+```
+
+#### Which 5-minute interval, on average across all the days in the dataset, contains the maximum number of steps?
+```{r}
+entity_agg_intrvl_df[which(entity_agg_intrvl_df["steps_mean"] == 
+                     max(entity_agg_intrvl_df$steps_mean)), ]
+```
 
 ## Imputing missing values
 
+#### Calculate and report the total number of missing values in the dataset (i.e. the total number of rows with NAs)
+```{r}
+summary(entity_df$steps)
+```
 
+#### Devise a strategy for filling in all of the missing values in the dataset. 
+
+Use the mean for that 5-minute interval.
+
+#### Create a new dataset that is equal to the original dataset but with the missing data filled in.
+```{r}
+require(plyr)
+intersect(names(entity_df), names(entity_agg_intrvl_df))
+entimptd_df <- join(entity_df, entity_agg_intrvl_df, by="interval")
+entimptd_df <- mutate(entimptd_df, steps_imputed=ifelse(is.na(steps), steps_mean,
+                                                                      steps))
+```
+
+#### Make a histogram of the total number of steps taken each day
+```{r}
+entimptd_agg_date_df <- myaggregate_numorlgcl(subset(entimptd_df, 
+                                                     select=-c(interval, steps,
+                                                               steps_mean)), 
+                                              "date", sum)
+entimptd_agg_date_df <- mycreate_date2daytype(entimptd_agg_date_df, "date")
+myplot_histogram(entimptd_agg_date_df, "steps_imputed_sum", 
+                 fill_col_name="date_dytyp")
+```
+
+#### Calculate and report the mean and median total number of steps taken per day. Do these values differ from the estimates from the first part of the assignment? What is the impact of imputing missing data on the estimates of the total daily number of steps?
+```{r}
+summary(entimptd_agg_date_df$steps_imputed_sum)
+summary(entity_agg_date_df$steps_sum)
+```
+
+The imputation does not impact the mean or median
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+#### Create a new factor variable in the dataset with two levels – “weekday” and “weekend” indicating whether a given date is a weekday or weekend day.
+```{r}
+entimptd_df <- mycreate_date2daytype(entimptd_df, "date")
+```
+
+#### Make a panel plot containing a time series plot of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all weekday days or weekend days (y-axis). 
+```{r}
+entimptd_agg_intrvl_dtyp_df <- myaggregate_numorlgcl(
+    subset(entimptd_df, select=-c(steps, steps_mean)), 
+    c("interval", "date_dytyp"), mean)
+g <- ggplot(entimptd_agg_intrvl_dtyp_df, aes(x=interval, y=steps_imputed_mean))
+g + geom_line(color="blue") + facet_grid(date_dytyp ~ .)
+```
